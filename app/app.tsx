@@ -50,10 +50,6 @@ export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // --- Auth state ---
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
   // --- Navigation state ---
   const [step, setStep] = useState<Step>(() => {
     if (DEV_MODE && typeof window !== "undefined") {
@@ -84,6 +80,76 @@ export default function Home() {
   const [promptPairs, setPromptPairs] = useState<{ summary: string; prompt: string }[]>([]);
   const [promptLoading, setPromptLoading] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
+  // --- Visuals prompt selection ---
+  const [selectedPromptIndex, setSelectedPromptIndex] = useState<number | null>(null);
+  const [selectedPrompt, setSelectedPrompt] = useState<string>("");
+
+  // --- Visuals state for 'visuals_generate' step ---
+  const [visuals, setVisuals] = useState<string[]>([]);
+  const [visualsLoading, setVisualsLoading] = useState(false);
+  const [visualsError, setVisualsError] = useState<string | null>(null);
+  const [hasRequested, setHasRequested] = useState(false);
+  // --- Model selection for visuals ---
+  const [selectedModel, setSelectedModel] = useState<string>("sdxl");
+
+  // Export/download handler for visuals
+  const handleExport = (url: string) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'visual.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- Generate visual when entering visuals_generate step and selectedPrompt is set ---
+  // Compose full prompt with brand guide
+  let brandGuideText = '';
+  if (selectedClient?.brand_guide) {
+    const colors = selectedClient.brand_guide.colors?.length ? `Brand colors: ${selectedClient.brand_guide.colors.join(', ')}.` : '';
+    const logo = selectedClient.brand_guide.logo ? `Logo: ${selectedClient.brand_guide.logo}.` : '';
+    brandGuideText = [colors, logo].filter(Boolean).join(' ');
+  }
+  const fullPrompt = `${selectedPrompt} ${brandGuideText}`.trim();
+
+  useEffect(() => {
+    if (step === "visuals_generate" && !hasRequested && fullPrompt && visuals.length === 0) {
+      console.log("[Visuals] Triggering visual generation");
+      console.log("[Visuals] Prompt being sent:", fullPrompt);
+      setVisualsLoading(true);
+      setVisualsError(null);
+      setHasRequested(true);
+      fetch('/api/generate-visual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: fullPrompt, model: selectedModel })
+      })
+        .then(async res => {
+          const json = await res.json();
+          console.log("[Visuals] API response:", json);
+          return json;
+        })
+        .then(res => {
+          if (res.imageUrl) setVisuals([res.imageUrl]);
+          else setVisualsError(res.error || 'Failed to generate visual');
+        })
+        .catch(err => {
+          console.error("[Visuals] API call failed:", err);
+          setVisualsError(typeof err === 'string' ? err : (err as any)?.toString() || 'Unknown error');
+        })
+        .finally(() => setVisualsLoading(false));
+    }
+    if (step !== "visuals_generate") {
+      setHasRequested(false);
+      setVisuals([]);
+      setVisualsError(null);
+      setVisualsLoading(false);
+    }
+  }, [step, hasRequested, fullPrompt, visuals.length]);
+
+  // --- Auth state ---
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   // --- App-level error ---
   const [appError, setAppError] = useState<string | null>(null);
@@ -91,6 +157,9 @@ export default function Home() {
   // --- Visual selection state ---
   const [selectedVisual, setSelectedVisual] = useState<string | null>(null);
   const [visualRefs, setVisualRefs] = useState<string[]>([]);
+
+  // (All navigation, client, post, prompt, and selection state are already declared above -- remove any below this comment!)
+
 
 
   useEffect(() => {
@@ -114,6 +183,21 @@ export default function Home() {
       setClients([]);
     }
   }, [user]);
+
+  // Always refetch clients when entering Home step
+  useEffect(() => {
+    if (step === "home" && user) {
+      setClientLoading(true);
+      getClients(user.id)
+        .then(({ data, error }) => {
+          if (error) setAppError(typeof error === 'string' ? error : (error as any)?.toString() || 'Unknown error');
+          else setClients(data || []);
+        })
+        .finally(() => setClientLoading(false));
+    }
+  }, [step, user]);
+
+  // After add/edit/delete, refresh clients (call setStep("home") after those actions to trigger the above effect)
 
   useEffect(() => {
     if (selectedClient) {
@@ -480,38 +564,83 @@ export default function Home() {
     // --- SUGGESTED IDEAS STEP ---
     if (step === "suggested_ideas") {
       return (
-        <div className="max-w-3xl mx-auto mt-8">
-          <h2 className="text-xl font-bold mb-4">Suggested Visual Prompts</h2>
-          {promptLoading ? (
-            <div className="text-center text-gray-500">Generating prompt suggestions...</div>
-          ) : promptError ? (
-            <div className="text-center text-red-600">{promptError}</div>
-          ) : promptPairs.length === 0 ? (
-            <div className="text-center text-yellow-600">No prompt suggestions could be generated.</div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              {promptPairs.map((pair, idx) => (
-                <div key={idx} className="bg-white rounded shadow p-4 flex flex-col h-full">
-                  <div className="font-semibold text-lg text-blue-700 text-left mb-2">{pair.summary}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Custom prompt input area */}
-          <div className="mb-6">
-            <label className="block font-semibold mb-2 text-gray-700">Custom Prompt</label>
-            <textarea
-              className="border rounded w-full p-2 min-h-[60px]"
-              placeholder="Write your own prompt if the suggestions aren't great..."
-              value={promptInputs[3] || ""}
-              onChange={e => {
-                const newInputs = [...promptInputs];
-                newInputs[3] = e.target.value;
-                setPromptInputs(newInputs);
-              }}
-            />
+        <div className="max-w-2xl mx-auto mt-8">
+          <div className="mb-4">
+            <h2 className="text-xl font-bold mb-4">Suggested Prompts</h2>
           </div>
-          <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
+          <div className="mb-4">
+            <label className="block mb-1 font-medium">Select Model:</label>
+            <select
+              className="mb-3 p-2 border rounded w-full"
+              value={selectedModel}
+              onChange={e => setSelectedModel(e.target.value)}
+            >
+              <option value="sdxl">Stable Diffusion XL</option>
+              <option value="sd15">Stable Diffusion 1.5</option>
+              <option value="dreamshaper">DreamShaper</option>
+              <option value="gptimage">OpenAI GPT-Image-1</option>
+            </select>
+          </div>
+          <div className="grid gap-4 mb-6">
+            {promptPairs.map((pair, idx) => (
+              <label key={idx} className={`block border rounded p-4 cursor-pointer ${selectedPromptIndex === idx ? 'border-blue-600 bg-blue-50' : 'border-gray-200'}` }>
+                <input
+                  type="radio"
+                  name="prompt"
+                  className="mr-3"
+                  checked={selectedPromptIndex === idx}
+                  onChange={() => {
+                    setSelectedPromptIndex(idx);
+                    setSelectedPrompt(pair.prompt);
+                  }}
+                />
+                <span className="font-semibold">{pair.summary}</span>
+                <div className="text-gray-700 mt-1">{pair.prompt}</div>
+              </label>
+            ))}
+            <label className={`block border rounded p-4 cursor-pointer ${selectedPromptIndex === 999 ? 'border-blue-600 bg-blue-50' : 'border-gray-200'}` }>
+              <input
+                type="radio"
+                name="prompt"
+                className="mr-3"
+                checked={selectedPromptIndex === 999}
+                onChange={() => {
+                  setSelectedPromptIndex(999);
+                  setSelectedPrompt(promptInputs[3] || "");
+                }}
+              />
+              <span className="font-semibold">Custom Prompt</span>
+              <input
+                type="text"
+                className="block w-full mt-2 border rounded p-2"
+                value={promptInputs[3] || ""}
+                onChange={e => {
+                  const newInputs = [...promptInputs];
+                  newInputs[3] = e.target.value;
+                  setPromptInputs(newInputs);
+                  if (selectedPromptIndex === 999) setSelectedPrompt(e.target.value);
+                }}
+                placeholder="Write your own prompt..."
+              />
+            </label>
+          </div>
+          <div className="flex justify-between items-center mt-8">
+            <button
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+              onClick={() => setStep("add_post_content")}
+            >
+              ← Prev
+            </button>
+            <button
+              className={`px-4 py-2 rounded font-semibold transition-colors ${selectedPrompt ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-gray-200 text-gray-500 cursor-not-allowed"}`}
+              disabled={!selectedPrompt}
+              onClick={() => {
+                if (selectedPrompt) setStep("visuals_generate" as Step);
+              }}
+            >
+              Generate Visual
+            </button>
+          </div>
         </div>
       );
     }
