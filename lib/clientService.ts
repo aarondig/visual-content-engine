@@ -1,15 +1,15 @@
 import { supabase } from "../lib/supabaseClient";
+import { BrandGuide, Client } from "../types";
 
-export async function getClients(userId: string): Promise<{ data: Client[] | null; error: any }> {
+export async function getClients(userId: string): Promise<{ data: Client[] | null; error: string | null }> {
   const { data, error } = await supabase
     .from("clients")
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
-  return { data: data as Client[] | null, error };
+  return { data: data as Client[] | null, error: error ? String(error) : null };
 }
 
-import { Client } from "../types";
 
 export async function addClient(
   userId: string,
@@ -19,8 +19,8 @@ export async function addClient(
   linkedin: string,
   website: string,
   image: string,
-  brand_guide: Record<string, any>
-): Promise<{ data: Client[] | null; error: any }> {
+  brand_guide: BrandGuide
+): Promise<{ data: Client[] | null; error: string | null }> {
   const { data, error } = await supabase
     .from("clients")
     .insert([
@@ -36,7 +36,7 @@ export async function addClient(
       },
     ])
     .select();
-  return { data: data as Client[] | null, error };
+  return { data: data as Client[] | null, error: error ? String(error) : null };
 }
 
 export async function deleteClient(clientId: string) {
@@ -44,5 +44,5 @@ export async function deleteClient(clientId: string) {
     .from("clients")
     .delete()
     .eq("id", clientId);
-  return { data, error };
+  return { data, error: error ? String(error) : null };
 }

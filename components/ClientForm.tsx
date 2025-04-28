@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Client } from "../types";
+import { Client, BrandGuide } from "../types";
 
 interface ClientFormProps {
   onAdd: (
@@ -12,7 +12,7 @@ interface ClientFormProps {
     linkedin: string,
     website: string,
     image: string,
-    brand_guide: Record<string, any>
+    brand_guide: BrandGuide
   ) => void;
   loading: boolean;
   // Optional initial values for editing

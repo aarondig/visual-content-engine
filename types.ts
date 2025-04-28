@@ -1,5 +1,10 @@
 // Shared types for Visual Content Engine
 
+export interface BrandGuide {
+  colors: string[];
+  logo: string;
+}
+
 export interface Client {
   id: string;
   user_id: string;
@@ -9,6 +14,6 @@ export interface Client {
   linkedin: string;
   website: string;
   image: string; // URL or storage ref
-  brand_guide: Record<string, any>; // or a more specific type if you like
+  brand_guide: BrandGuide;
   created_at: string;
 }
