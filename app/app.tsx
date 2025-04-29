@@ -86,11 +86,56 @@ export default function Home() {
 
   // --- Visuals state for 'visuals_generate' step ---
   const [visuals, setVisuals] = useState<string[]>([]);
+
+  // --- Number of images to generate (user configurable) ---
+  const [numImages, setNumImages] = useState(6);
+
+  // --- Generate Visuals (runs numImages API calls in parallel) ---
+  async function generateVisuals() {
+    setVisualsLoading(true);
+    try {
+      const results = await Promise.all(
+        Array.from({ length: numImages }).map(() =>
+          fetch('/api/generate-visual', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: selectedPrompt || promptInputs[0] || postContent, model: selectedModel, provider: selectedProvider }),
+          })
+            .then(res => res.json())
+            .then(data => {
+              if (data.imageUrl) return data.imageUrl;
+              if (data.images && Array.isArray(data.images) && data.images[0]?.base64)
+                return `data:image/png;base64,${data.images[0].base64}`;
+              return null;
+            })
+            .catch(() => null)
+        )
+      );
+      setVisuals(results.filter(url => url && typeof url === "string" && url.trim() !== ""));
+    } finally {
+      setVisualsLoading(false);
+    }
+  }
   const [visualsLoading, setVisualsLoading] = useState(false);
   const [visualsError, setVisualsError] = useState<string | null>(null);
   const [hasRequested, setHasRequested] = useState(false);
-  // --- Model selection for visuals ---
-  const [selectedModel, setSelectedModel] = useState<string>("sdxl");
+  // --- Provider/model selection for visuals ---
+  const modelOptions: Record<'replicate' | 'together', { value: string; label: string }[]> = {
+    replicate: [
+      { value: 'sdxl', label: 'Stable Diffusion XL' },
+      { value: 'sd15', label: 'Stable Diffusion 1.5' },
+      { value: 'dreamshaper', label: 'DreamShaper' },
+      { value: 'gptimage', label: 'OpenAI GPT-Image-1' },
+    ],
+    together: [
+      { value: 'black-forest-labs/FLUX.1-schnell-Free', label: 'FLUX.1-schnell-Free' },
+      { value: 'black-forest-labs/FLUX.1-dev', label: 'FLUX.1-dev' },
+      { value: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX.1-schnell' },
+      { value: 'black-forest-labs/FLUX.1-depth', label: 'FLUX.1-depth' }
+    ]
+  };
+  const [selectedProvider, setSelectedProvider] = useState<'replicate' | 'together'>('replicate');
+  const [selectedModel, setSelectedModel] = useState<string>(modelOptions['replicate'][0].value);
 
   // Export/download handler for visuals
   const handleExport = (url: string) => {
@@ -122,7 +167,11 @@ export default function Home() {
       fetch('/api/generate-visual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: fullPrompt, model: selectedModel })
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          model: selectedModel,
+          provider: selectedProvider
+        })
       })
         .then(async res => {
           const json = await res.json();
@@ -130,8 +179,18 @@ export default function Home() {
           return json;
         })
         .then(res => {
-          if (res.imageUrl) setVisuals([res.imageUrl]);
-          else setVisualsError(res.error || 'Failed to generate visual');
+          let visualsArr: string[] = [];
+          if (res.imageUrl) {
+            visualsArr = [res.imageUrl];
+          } else if (res.images && Array.isArray(res.images) && res.images[0]?.base64) {
+            visualsArr = res.images.map((img: any) => `data:image/png;base64,${img.base64}`);
+          } else if (res.images && Array.isArray(res.images) && res.images[0]?.url) {
+            visualsArr = res.images.map((img: any) => img.url);
+          }
+          // Always fill to 6 images for the grid
+          while (visualsArr.length < 6) visualsArr.push("");
+          setVisuals(visualsArr);
+          if (visualsArr.length === 0) setVisualsError(res.error || 'Failed to generate visual');
         })
         .catch(err => {
           console.error("[Visuals] API call failed:", err);
@@ -373,6 +432,7 @@ export default function Home() {
                   </>
                 )}
               </div>
+
               <button
                 className="ml-2 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium hover:bg-green-200"
                 onClick={() => setShowAddClient(true)}
@@ -381,6 +441,7 @@ export default function Home() {
                 + Add Client
               </button>
             </div>
+
             <button
               className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${clients.length > 0 ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-gray-200 text-gray-500 cursor-not-allowed"}`}
               disabled={clients.length === 0}
@@ -390,6 +451,7 @@ export default function Home() {
               New Post
             </button>
           </div>
+
           {showAddClient && (
             <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
               <div className="bg-white rounded shadow-lg p-6 w-full max-w-xl relative text-left">
@@ -448,7 +510,9 @@ export default function Home() {
 />
                 {postError && <div className="text-red-600 mb-2">{postError}</div>}
               </div>
+
             </div>
+
           )}
           <div className="mt-6">
             {galleryLoading ? (
@@ -467,12 +531,16 @@ export default function Home() {
                     <div className="text-xs text-gray-700 font-mono mb-1 line-clamp-2 text-center">{post.content}</div>
                     <div className="text-xs text-gray-400">{new Date(post.created_at).toLocaleString()}</div>
                   </div>
+
                 ))}
               </div>
+
             )}
           </div>
+
           <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
         </div>
+
       );
     }
     // --- CHOOSE CLIENT STEP ---
@@ -497,6 +565,7 @@ export default function Home() {
                     <div className="font-semibold">{client.name}</div>
                     <div className="text-xs text-gray-500">{client.company_name}</div>
                   </div>
+
                 </li>
               ))}
             </ul>
@@ -509,6 +578,7 @@ export default function Home() {
           </button>
           <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
         </div>
+
       );
     }
     // --- ADD POST CONTENT STEP ---
@@ -556,9 +626,11 @@ export default function Home() {
             </form>
           </div>
 
+
           {/* TODO: Visual reference upload UI */}
           <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
         </div>
+
       );
     }
     // --- SUGGESTED IDEAS STEP ---
@@ -568,19 +640,40 @@ export default function Home() {
           <div className="mb-4">
             <h2 className="text-xl font-bold mb-4">Suggested Prompts</h2>
           </div>
-          <div className="mb-4">
-            <label className="block mb-1 font-medium">Select Model:</label>
-            <select
-              className="mb-3 p-2 border rounded w-full"
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
-            >
-              <option value="sdxl">Stable Diffusion XL</option>
-              <option value="sd15">Stable Diffusion 1.5</option>
-              <option value="dreamshaper">DreamShaper</option>
-              <option value="gptimage">OpenAI GPT-Image-1</option>
-            </select>
+
+          {/* Provider/model selectors */}
+          <div className="flex gap-4 mb-4">
+            <div>
+              <label className="block mb-1 font-medium">Provider</label>
+              <select
+                value={selectedProvider}
+                onChange={e => {
+                  const provider = e.target.value as 'replicate' | 'together';
+                  setSelectedProvider(provider);
+                  setSelectedModel(modelOptions[provider][0].value);
+                }}
+                className="p-2 border rounded"
+              >
+                <option value="replicate">Replicate</option>
+                <option value="together">Together AI</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block mb-1 font-medium">Model</label>
+              <select
+                value={selectedModel}
+                onChange={e => setSelectedModel(e.target.value)}
+                className="p-2 border rounded"
+              >
+                {modelOptions[selectedProvider].map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
           </div>
+
           <div className="grid gap-4 mb-6">
             {promptPairs.map((pair, idx) => (
               <label key={idx} className={`block border rounded p-4 cursor-pointer ${selectedPromptIndex === idx ? 'border-blue-600 bg-blue-50' : 'border-gray-200'}` }>
@@ -624,6 +717,7 @@ export default function Home() {
               />
             </label>
           </div>
+
           <div className="flex justify-between items-center mt-8">
             <button
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
@@ -641,7 +735,9 @@ export default function Home() {
               Generate Visual
             </button>
           </div>
+
         </div>
+
       );
     }
     // --- VISUALS GENERATE STEP ---
@@ -649,19 +745,68 @@ export default function Home() {
       return (
         <div className="max-w-3xl mx-auto mt-8">
           <h2 className="text-xl font-bold mb-4">Generated Visuals</h2>
+{/* Provider/model selectors */}
+<div className="flex gap-4 mb-4">
+  <div>
+    <label className="block mb-1 font-medium">Provider</label>
+    <select
+      value={selectedProvider}
+      onChange={e => {
+        const provider = e.target.value as 'replicate' | 'together';
+        setSelectedProvider(provider);
+        setSelectedModel(modelOptions[provider][0].value);
+      }}
+      className="p-2 border rounded"
+    >
+      <option value="replicate">Replicate</option>
+      <option value="together">Together AI</option>
+    </select>
+  </div>
+
+  <div>
+    <label className="block mb-1 font-medium">Model</label>
+    <select
+      value={selectedModel}
+      onChange={e => setSelectedModel(e.target.value)}
+      className="p-2 border rounded"
+    >
+      {modelOptions[selectedProvider].map(opt => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
+  </div>
+
+</div>
           {/* TODO: Visuals grid, selection, and toolbar */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {/* Placeholder visuals */}
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="bg-gray-200 rounded-lg h-40 flex items-center justify-center cursor-pointer"
-                onClick={() => setSelectedVisual(`visual-${i}`)}
-              >
-                <span className="text-2xl text-gray-500">🖼️</span>
-              </div>
-            ))}
+  {visualsLoading
+    ? [...Array(numImages)].map((_, i) => (
+        <div
+          key={i}
+          className="bg-gray-200 rounded-lg h-40"
+        ></div>
+      ))
+    : (() => {
+        const gridVisuals = Array.from({ length: numImages }, (_, i) => {
+          const url = visuals[i];
+          return (url && typeof url === "string" && url.trim() !== "") ? url : null;
+        });
+        return gridVisuals.map((url, i) => (
+          <div
+            key={i}
+            className="bg-gray-200 rounded-lg h-40 flex items-center justify-center cursor-pointer"
+            onClick={() => url && setSelectedVisual(url)}
+          >
+            {url
+              ? <img src={url} alt={`Visual ${i + 1}`} className="object-cover w-full h-full rounded-lg" />
+              : <div className="w-full h-full flex items-center justify-center bg-gray-300 text-gray-500 text-sm font-medium rounded-lg">No Image</div>
+            }
           </div>
+
+        ));
+      })()
+  }
+</div>
           {selectedVisual && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
               <div className="bg-white p-6 rounded-lg shadow-lg max-w-xl w-full relative">
@@ -673,8 +818,9 @@ export default function Home() {
                   ×
                 </button>
                 <div className="w-full h-72 bg-gray-100 rounded flex items-center justify-center mb-4">
-                  <span className="text-4xl text-gray-400">🖼️</span>
+             
                 </div>
+
                 <div className="text-center text-gray-700 mb-2">{postContent}</div>
                 {/* TODO: Navigation arrows, toolbar, rerun, save, export, recreate */}
                 <div className="flex justify-center gap-4 mt-4">
@@ -686,42 +832,15 @@ export default function Home() {
                     setSelectedVisual(null);
                   }}>Recreate Similar</button>
                 </div>
+
               </div>
+
             </div>
+
           )}
-          <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
-          <h2 className="text-xl font-bold mb-4">Suggested Visual Prompts</h2>
-          {promptLoading ? (
-            <div className="text-center text-gray-500">Generating prompt suggestions...</div>
-          ) : promptError ? (
-            <div className="text-center text-red-600">{promptError}</div>
-          ) : promptPairs.length === 0 ? (
-            <div className="text-center text-yellow-600">No prompt suggestions could be generated.</div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              {promptPairs.map((pair, idx) => (
-                <div key={idx} className="bg-white rounded shadow p-4 flex flex-col h-full">
-                  <div className="font-semibold text-lg text-blue-700 text-left mb-2">{pair.summary}</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Custom prompt input area */}
-          <div className="mb-6">
-            <label className="block font-semibold mb-2 text-gray-700">Custom Prompt</label>
-            <textarea
-              className="border rounded w-full p-2 min-h-[60px]"
-              placeholder="Write your own prompt if the suggestions aren't great..."
-              value={promptInputs[3] || ""}
-              onChange={e => {
-                const newInputs = [...promptInputs];
-                newInputs[3] = e.target.value;
-                setPromptInputs(newInputs);
-              }}
-            />
-          </div>
           <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
         </div>
+
       );
     }
 
@@ -730,48 +849,108 @@ export default function Home() {
       return (
         <div className="max-w-3xl mx-auto mt-8">
           <h2 className="text-xl font-bold mb-4">Generated Visuals</h2>
+{/* Provider/model selectors */}
+<div className="flex gap-4 mb-4">
+  <div>
+    <label className="block mb-1 font-medium">Provider</label>
+    <select
+      value={selectedProvider}
+      onChange={e => {
+        const provider = e.target.value as 'replicate' | 'together';
+        setSelectedProvider(provider);
+        setSelectedModel(modelOptions[provider][0].value);
+      }}
+      className="p-2 border rounded"
+    >
+      <option value="replicate">Replicate</option>
+      <option value="together">Together AI</option>
+    </select>
+  </div>
+
+  <div>
+    <label className="block mb-1 font-medium">Model</label>
+    <select
+      value={selectedModel}
+      onChange={e => setSelectedModel(e.target.value)}
+      className="p-2 border rounded"
+    >
+      {modelOptions[selectedProvider].map(opt => (
+        <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
+  </div>
+
+</div>
           {/* TODO: Visuals grid, selection, and toolbar */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {/* Placeholder visuals */}
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="bg-gray-200 rounded-lg h-40 flex items-center justify-center cursor-pointer"
-                onClick={() => setSelectedVisual(`visual-${i}`)}
-              >
-                <span className="text-2xl text-gray-500">🖼️</span>
-              </div>
-            ))}
+  {visualsLoading
+    ? [...Array(6)].map((_, i) => (
+        <div
+          key={i}
+          className="bg-gray-200 skeleton rounded-lg h-40"
+        ></div>
+      ))
+    : (() => {
+        const gridVisuals = Array.from({ length: numImages }, (_, i) => {
+          const url = visuals[i];
+          return (url && typeof url === "string" && url.trim() !== "") ? url : null;
+        });
+        return gridVisuals.map((url, i) => (
+          <div
+            key={i}
+            className="bg-gray-200 rounded-lg h-40 flex items-center justify-center cursor-pointer"
+            onClick={() => url && setSelectedVisual(url)}
+          >
+            {url
+              ? <img src={url} alt={`Visual ${i + 1}`} className="object-cover w-full h-full rounded-lg" />
+              : <div className="w-full h-full flex items-center justify-center bg-gray-300 text-gray-500 text-sm font-medium rounded-lg">No Image</div>
+            }
           </div>
-          {selectedVisual && (
-            <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-              <div className="bg-white p-6 rounded-lg shadow-lg max-w-xl w-full relative">
-                <button
-                  className="absolute top-2 right-2 text-gray-400 hover:text-gray-700"
-                  onClick={() => setSelectedVisual(null)}
-                  title="Close"
-                >
-                  ×
-                </button>
-                <div className="w-full h-72 bg-gray-100 rounded flex items-center justify-center mb-4">
-                  <span className="text-4xl text-gray-400">🖼️</span>
-                </div>
-                <div className="text-center text-gray-700 mb-2">{postContent}</div>
-                {/* TODO: Navigation arrows, toolbar, rerun, save, export, recreate */}
-                <div className="flex justify-center gap-4 mt-4">
-                  <button className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Save</button>
-                  <button className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Export</button>
-                  <button className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300" onClick={() => {
-                    setStep("add_post_content" as Step);
-                    setVisualRefs([selectedVisual!]); // TODO: Pass actual reference
-                    setSelectedVisual(null);
-                  }}>Recreate Similar</button>
-                </div>
-              </div>
-            </div>
-          )}
+
+        ));
+      })()
+  }
+</div>
+{selectedVisual && (
+  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+    <div className="bg-white p-6 rounded-lg shadow-lg max-w-xl w-full relative">
+      <button
+        className="absolute top-2 right-2 text-gray-400 hover:text-gray-700"
+        onClick={() => setSelectedVisual(null)}
+        title="Close"
+      >
+        ×
+      </button>
+      <div className="w-full h-72 bg-gray-100 rounded flex items-center justify-center mb-4">
+        {(typeof selectedVisual === "string" && selectedVisual.trim() !== "" &&
+  (selectedVisual.startsWith('data:image') || selectedVisual.startsWith('http'))
+) ? (
+  <img src={selectedVisual} alt="Selected Visual" className="object-contain max-h-64 max-w-full" />
+) : (
+  <span className="text-4xl text-gray-400">🖼️</span>
+)}
+      </div>
+
+      <div className="text-center text-gray-700 mb-2">{postContent}</div>
+      {/* TODO: Navigation arrows, toolbar, rerun, save, export, recreate */}
+      <div className="flex justify-center gap-4 mt-4">
+        <button className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Save</button>
+        <button className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300">Export</button>
+        <button className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300" onClick={() => {
+          setStep("add_post_content" as Step);
+          setVisualRefs([selectedVisual!]); // TODO: Pass actual reference
+          setSelectedVisual(null);
+        }}>Recreate Similar</button>
+      </div>
+
+    </div>
+
+  </div>
+
+)}
           <StepNavigation step={step} setStep={setStep} steps={STEPS} disabledSteps={disabledSteps} />
         </div>
+
       );
     }
     // --- DEFAULT ---
@@ -799,14 +978,17 @@ export default function Home() {
                 <div className={`w-6 h-6 flex items-center justify-center rounded-full border-2 ${step === s.key ? "border-blue-600 bg-blue-50" : "border-gray-300 bg-white"}`}>{idx + 1}</div>
                 <span className="text-sm">{s.label}</span>
               </div>
+
               {idx < arr.length - 1 && <div className="flex-1 h-0.5 bg-gray-200 mx-2" />}
             </li>
           ))}
         </ol>
       </div>
+
       <div className="max-w-2xl mx-auto p-6 bg-white rounded shadow text-left">
         {renderStep()}
       </div>
+
       {showEditClient && editClient && (
         <ClientEditDrawer client={editClient} onClose={() => { setShowEditClient(false); setEditClient(null); }} />
       )}

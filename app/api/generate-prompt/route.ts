@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "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";
-const DEFAULT_MODEL = "microsoft/mai-ds-r1:free"; // Microsoft MAI DS R1 free endpoint
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
+const DEFAULT_MODEL = "deepseek/deepseek-chat-v3-0324:free"; // DeepSeek Chat v3 free endpoint
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,8 +18,8 @@ Your task: For each LinkedIn post, generate THREE (3) DISTINCT summary/prompt pa
 - Use the client's brand colors and style, prioritizing minimalism.
 - The prompt should be visually descriptive, minimal, and reflect the post's personality (e.g., humor, relatability, professionalism) as inferred from the post content.
 - Do NOT include any text or watermark in the image.
-- Output ONLY the following format, with NO commentary, NO explanation, and NO extra text. If you do not follow this format, your output will be rejected.
-- If you do not output exactly 3 summary/prompt pairs in the format above, your response will be discarded:
+
+IMPORTANT: Output ONLY the following format, with NO commentary, NO explanation, and NO extra text. If you do not follow this format, your output will be rejected. DO NOT include any brainstorming, reasoning, or introductory text. Output ONLY the pairs as shown below:
 
 Summary 1: <summary 1>
 Prompt 1: <prompt 1>
@@ -27,6 +27,8 @@ Summary 2: <summary 2>
 Prompt 2: <prompt 2>
 Summary 3: <summary 3>
 Prompt 3: <prompt 3>
+
+(Repeat: Do NOT include any commentary, brainstorming, or explanation. Output ONLY the summary/prompt pairs as shown above, nothing else.)
 
 Brand colors: ${clientBrandGuide?.colors?.join(', ') || 'none specified'}
 Style: ${clientBrandGuide?.style || 'minimalist'}
@@ -71,31 +73,33 @@ Tone: ${clientTone || clientBrandGuide?.tone || 'professional'}
       // Fallback: use reasoning field if present
       content = data.choices?.[0]?.message?.reasoning?.trim();
     }
+    // Always log the raw LLM output for debugging
+    console.log("[LLM Raw Output]", content);
     if (!content) {
       console.error("No prompt generated. Full response:", JSON.stringify(data));
       return NextResponse.json({ error: "No prompt generated", fullResponse: data }, { status: 500 });
     }
     // Robustly parse the LLM output for Summary and Prompt (order-independent, ignore extra text)
     function extractPromptPairs(text: string) {
-      // More forgiving regex: allow for optional spaces, case-insensitive, tolerate missing numbers (but prefer numbered), now up to 3
-      const regex = /Summary\s*([1-3])\s*:\s*([^\n]+)\nPrompt\s*\1\s*:\s*([\s\S]*?)(?=\nSummary|$)/gim;
-      const pairs = [];
+      // Remove markdown bold/italic and trim whitespace
+      text = text.replace(/[*_]+/g, '').trim();
+      // Extract all summaries and prompts, then pair strictly by order (ignore numbering)
+      const summaryRegex = /Summary\s*([1-3])?\s*:\s*["“]?([^\n"]+)["”]?/gi;
+      const promptRegex = /Prompt\s*([1-3])?\s*:\s*["“]?([\s\S]*?)(?=\n\S|$)/gi;
+      const summaries: string[] = [];
+      const prompts: string[] = [];
       let match;
-      while ((match = regex.exec(text)) !== null) {
-        pairs.push({
-          summary: match[2].trim(),
-          prompt: match[3].trim()
-        });
+      while ((match = summaryRegex.exec(text)) !== null) {
+        summaries.push(match[2].trim());
       }
-      // If less than 3, try to recover unnumbered pairs
-      if (pairs.length < 3) {
-        const fallbackRegex = /Summary\s*:([^\n]+)\nPrompt\s*:([\s\S]*?)(?=\nSummary|$)/gim;
-        let fallbackMatch;
-        while ((fallbackMatch = fallbackRegex.exec(text)) !== null) {
-          pairs.push({
-            summary: fallbackMatch[1].trim(),
-            prompt: fallbackMatch[2].trim()
-          });
+      while ((match = promptRegex.exec(text)) !== null) {
+        prompts.push(match[2].trim());
+      }
+      // Pair strictly by order
+      const pairs = [];
+      for (let i = 0; i < Math.min(summaries.length, prompts.length); i++) {
+        if (summaries[i] && prompts[i]) {
+          pairs.push({ summary: summaries[i], prompt: prompts[i] });
         }
       }
       return pairs;
